@@ -26,7 +26,6 @@ st.set_page_config(page_title="Gestão JEJ", layout="wide")
 url, key = st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(url, key)
 
-# Função para carregar dados (sem cache para o editor refletir mudanças na hora)
 def load_data_fresh():
     res = supabase.table("fluxo_caixa_ofx").select("*").execute()
     df = pd.DataFrame(res.data)
@@ -39,93 +38,74 @@ def load_data_fresh():
 
 df_raw = load_data_fresh()
 
-# 4. INTERFACE COM ABAS
-st.title("📊 Sistema de Gestão Financeira JEJ")
-tab_dashboard, tab_editor = st.tabs(["📈 Dashboard de Análise", "🛠️ Editor de Lançamentos"])
+# 4. INTERFACE
+st.title("📊 Gestão Financeira JEJ")
+tab1, tab2 = st.tabs(["📈 Dashboard Limpo", "🛠️ Limpeza e Edição de Dados"])
 
 meses_pt = {"January":"Janeiro","February":"Fevereiro","March":"Março","April":"Abril","May":"Maio","June":"Junho","July":"Julho","August":"Agosto","September":"Setembro","October":"Outubro","November":"Novembro","December":"Dezembro"}
 
-# --- ABA 1: DASHBOARD ---
-with tab_dashboard:
-    if df_raw.empty:
-        st.warning("Banco de dados vazio.")
+# --- ABA 1: DASHBOARD (IGNORA TOTALMENTE RENDE FÁCIL) ---
+with tab1:
+    # FILTRO RIGOROSO: Remove aplicações financeiras da visualização
+    df_dashboard = df_raw[~df_raw['descricao_original'].str.contains('RENDE FÁCIL|RENDE FACIL', case=False, na=False)].copy()
+    
+    if df_dashboard.empty:
+        st.info("Aguardando dados (ou todos os dados atuais são Rende Fácil).")
     else:
-        df_clean = df_raw[~df_raw['descricao_original'].str.contains('RENDE FÁCIL|RENDE FACIL', case=False, na=False)].copy()
-        
-        c_f1, c_f2 = st.columns(2)
-        with c_f1: ano_sel = st.selectbox("Ano", sorted(df_clean['ano'].unique(), reverse=True), key="ano_dash")
-        with c_f2:
-            m_disp = df_clean[df_clean['ano']==ano_sel]['mes_nome'].unique()
-            lista_m = [meses_pt[m] for m in meses_pt if m in m_disp]
-            mes_filt = st.selectbox("Mês", lista_m, key="mes_dash")
+        c1, c2 = st.columns(2)
+        with c1: ano = st.selectbox("Ano", sorted(df_dashboard['ano'].unique(), reverse=True), key="a1")
+        with c2:
+            m_disp = df_dashboard[df_dashboard['ano']==ano]['mes_nome'].unique()
+            mes = st.selectbox("Mês", [meses_pt[m] for m in meses_pt if m in m_disp], key="m1")
 
-        m_eng = [k for k,v in meses_pt.items() if v==mes_filt][0]
-        df = df_clean[(df_clean['ano']==ano_sel) & (df_clean['mes_nome']==m_eng)].copy()
+        m_eng = [k for k,v in meses_pt.items() if v==mes][0]
+        df = df_dashboard[(df_dashboard['ano']==ano) & (df_dashboard['mes_nome']==m_eng)].copy()
 
+        # Métricas
         rec = df[df['valor'] > 0]['valor'].sum()
         desp = df[df['valor'] < 0]['valor'].sum()
-        saldo = rec + desp
+        st.columns(3)[0].metric("Receitas Reais", f"R$ {rec:,.2f}")
+        st.columns(3)[1].metric("Despesas Reais", f"R$ {abs(desp):,.2f}")
+        st.columns(3)[2].metric("Saldo Operacional", f"R$ {(rec+desp):,.2f}")
 
-        k1, k2, k3 = st.columns(3)
-        k1.metric("Receitas Reais", f"R$ {rec:,.2f}")
-        k2.metric("Despesas Reais", f"R$ {abs(desp):,.2f}")
-        k3.metric("Saldo Líquido", f"R$ {saldo:,.2f}")
-
-        st.divider()
-
-        # Gráficos (Lógica anterior de barras horizontais e cores pretas)
-        def criar_fig(df_in, col, titulo, total_r, colors):
+        # Gráficos
+        def plot_h(df_in, col, titulo, total_r, colors):
             temp = df_in[df_in['valor'] < 0].groupby(col)['valor'].sum().abs().reset_index().sort_values('valor')
             temp['pct'] = (temp['valor'] / total_r * 100) if total_r > 0 else 0
             temp['txt'] = temp.apply(lambda x: f"R$ {x['valor']:,.2f} ({x['pct']:.1f}%)", axis=1)
             fig = px.bar(temp, x='valor', y=col, text='txt', color=col, color_discrete_sequence=colors, title=titulo)
-            fig.update_traces(textposition='outside', textfont=dict(color='black', size=13), cliponaxis=False)
-            fig.update_layout(showlegend=False, margin=dict(l=10, r=150, t=50, b=10), xaxis_title=None, yaxis_title=None, xaxis=dict(showticklabels=False, showgrid=False))
+            fig.update_traces(textposition='outside', textfont=dict(color='black', size=12), cliponaxis=False)
+            fig.update_layout(showlegend=False, margin=dict(l=10, r=150, t=50, b=10), xaxis=dict(showticklabels=False))
             return fig
 
-        st.plotly_chart(criar_fig(df, 'gestao', "📌 Despesas por Gestão", rec, px.colors.qualitative.Prism), use_container_width=True)
-        st.plotly_chart(criar_fig(df, 'categoria', "🏷️ Despesas por Categoria", rec, px.colors.qualitative.Safe), use_container_width=True)
+        st.plotly_chart(plot_h(df, 'gestao', "📌 Gestão", rec, px.colors.qualitative.Prism), use_container_width=True)
+        st.plotly_chart(plot_h(df, 'categoria', "🏷️ Categoria", rec, px.colors.qualitative.Safe), use_container_width=True)
 
-# --- ABA 2: EDITOR (ONDE VOCÊ RESOLVE O PROBLEMA DA GESTÃO DE PESSOAS) ---
-with tab_editor:
-    st.subheader("🔍 Localizar e Corrigir Lançamentos")
+# --- ABA 2: EDITOR E LIMPEZA (PARA APAGAR O QUE NÃO DEVERIA ESTAR LÁ) ---
+with tab2:
+    st.subheader("🧹 Faxina no Banco de Dados")
+    st.write("Use esta aba para excluir transações de 'Rende Fácil' ou corrigir erros da IA.")
     
-    # Filtro rápido para o editor
-    busca = st.text_input("Filtrar por descrição (ex: nome de funcionário):")
-    df_edit = df_raw.copy()
-    if busca:
-        df_edit = df_edit[df_edit['descricao_original'].str.contains(busca, case=False)]
-
-    st.write(f"Exibindo {len(df_edit)} registros encontrados.")
+    search = st.text_input("Buscar transação (ex: Rende Fácil):", value="Rende Fácil")
+    df_search = df_raw[df_raw['descricao_original'].str.contains(search, case=False, na=False)]
     
-    # Seleção de linha para editar
-    selected_row = st.selectbox("Selecione a transação para editar/excluir:", 
-                                options=df_edit.index, 
-                                format_func=lambda x: f"{df_edit.loc[x, 'data_transacao'].strftime('%d/%m/%Y')} | {df_edit.loc[x, 'descricao_original']} | R$ {df_edit.loc[x, 'valor']}")
-
-    if not df_edit.empty:
-        row = df_edit.loc[selected_row]
+    if not df_search.empty:
+        st.warning(f"Foram encontrados {len(df_search)} registros com esse termo.")
+        selected = st.selectbox("Selecione o registro para DELETAR ou EDITAR:", 
+                                options=df_search.index,
+                                format_func=lambda x: f"{df_search.loc[x,'data_transacao'].strftime('%d/%m')} | {df_search.loc[x,'descricao_original']} | R$ {df_search.loc[x,'valor']}")
         
-        col_ed1, col_ed2, col_ed3 = st.columns(3)
-        with col_ed1:
-            nova_gestao = st.selectbox("Mudar Gestão para:", 
-                                      ["Gestão de Pessoas", "Gestão Operacional", "Gestão de Financiamentos", "Infraestrutura e Governança", "Outras Receitas"],
-                                      index=["Gestão de Pessoas", "Gestão Operacional", "Gestão de Financiamentos", "Infraestrutura e Governança", "Outras Receitas"].index(row['gestao']) if row['gestao'] in ["Gestão de Pessoas", "Gestão Operacional", "Gestão de Financiamentos", "Infraestrutura e Governança", "Outras Receitas"] else 0)
-        with col_ed2:
-            nova_cat = st.text_input("Mudar Categoria para:", value=row['categoria'])
+        row = df_search.loc[selected]
         
-        c_btn1, c_btn2 = st.columns(2)
-        with c_btn1:
-            if st.button("💾 Salvar Alterações"):
-                supabase.table("fluxo_caixa_ofx").update({"gestao": nova_gestao, "categoria": nova_cat}).eq("id", row['id']).execute()
-                st.success("Alterado com sucesso! Recarregue a página.")
-                st.rerun()
-        with c_btn2:
-            if st.button("🗑️ EXCLUIR REGISTRO"):
+        c_ed1, c_ed2 = st.columns(2)
+        with c_ed1:
+            if st.button("🗑️ EXCLUIR DEFINITIVAMENTE"):
                 supabase.table("fluxo_caixa_ofx").delete().eq("id", row['id']).execute()
-                st.warning("Registro excluído!")
                 st.rerun()
-
-    st.divider()
-    st.write("### Visualização Completa do Banco")
-    st.dataframe(df_edit[['data_transacao', 'descricao_original', 'valor', 'categoria', 'gestao']], use_container_width=True)
+        with c_ed2:
+            nova_g = st.selectbox("Corrigir Gestão para:", ["Gestão de Pessoas", "Gestão Operacional", "Gestão de Financiamentos", "Infraestrutura e Governança"])
+            if st.button("💾 SALVAR CORREÇÃO"):
+                supabase.table("fluxo_caixa_ofx").update({"gestao": nova_g}).eq("id", row['id']).execute()
+                st.rerun()
+    
+    st.dataframe(df_search[['data_transacao', 'descricao_original', 'valor', 'gestao']], use_container_width=True)
