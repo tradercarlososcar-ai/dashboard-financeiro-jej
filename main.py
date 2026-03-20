@@ -53,18 +53,16 @@ def load_data():
         df = pd.DataFrame(res.data)
         if df.empty: return df
         
-        # Correção 1: Garantir conversão de data sem quebrar o app em caso de erro
-        df['data_transacao'] = pd.to_datetime(df['data_transacao'], errors='coerce')
+        # Converte para data, mas NÃO deleta a linha se falhar (errors='coerce' vira NaT)
+        df['data_transacao_dt'] = pd.to_datetime(df['data_transacao'], errors='coerce')
         df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
         
-        # Remover linhas onde a data é nula para não quebrar os filtros de ano/mês
-        df = df.dropna(subset=['data_transacao'])
+        # Cria colunas de filtro apenas para datas válidas, senão usa padrão
+        df['ano'] = df['data_transacao_dt'].dt.year.fillna(0).astype(int)
+        df['mes_nome'] = df['data_transacao_dt'].dt.month_name().fillna("Sem Data")
         
-        df['ano'] = df['data_transacao'].dt.year.astype(int)
-        df['mes_nome'] = df['data_transacao'].dt.month_name()
         return df
-    except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
+    except:
         return pd.DataFrame()
 
 df_raw = load_data()
@@ -73,9 +71,10 @@ df_raw = load_data()
 st.title("📊 Painel de Gestão Financeira - JEJ")
 tab1, tab2 = st.tabs(["📈 Dashboard", "🛠️ Editor"])
 
-meses_pt = {"January":"Janeiro","February":"Fevereiro","March":"Março","April":"Abril","May":"Maio","June":"Junho","July":"Julho","August":"Agosto","September":"Setembro","October":"Outubro","November":"Novembro","December":"Dezembro"}
+meses_pt = {"January":"Janeiro","February":"Fevereiro","March":"Março","April":"Abril","May":"Maio","June":"Junho","July":"Julho","August":"Agosto","September":"Setembro","October":"Outubro","November":"Novembro","December":"Dezembro", "Sem Data": "Sem Data"}
 
 with tab1:
+    # Filtro visual para o Dashboard
     df_clean = df_raw[~df_raw['descricao_original'].str.contains('RENDE FÁCIL|RENDE FACIL', case=False, na=False)].copy()
     
     if not df_clean.empty:
@@ -91,20 +90,18 @@ with tab1:
         m_eng = [k for k,v in meses_pt.items() if v==mes][0]
         df = df_clean[(df_clean['ano']==ano) & (df_clean['mes_nome']==m_eng)].copy()
 
-        # SEÇÃO 1: RECEITA X DESPESA
-        st.subheader("📌 Mapa da Receita x Despesa")
+        st.subheader(f"📌 Resumo de {mes}/{ano}")
         rec = df[df['valor'] > 0]['valor'].sum()
         desp = df[df['valor'] < 0]['valor'].sum()
         saldo = rec + desp
 
         c1, c2, c3 = st.columns(3)
-        with c1: caixa_indicador("Receitas Reais", f"R$ {rec:,.2f}", "#E3F2FD", "#2196F3")
-        with c2: caixa_indicador("Despesas Reais", f"R$ {abs(desp):,.2f}", "#FFEBEE", "#EF5350")
+        with c1: caixa_indicador("Receitas", f"R$ {rec:,.2f}", "#E3F2FD", "#2196F3")
+        with c2: caixa_indicador("Despesas", f"R$ {abs(desp):,.2f}", "#FFEBEE", "#EF5350")
         with c3: caixa_indicador("Saldo Líquido", f"R$ {saldo:,.2f}", "#F1F8E9", "#689F38")
 
-        # SEÇÃO 2: GESTÃO COM PERCENTUAIS
         st.write("")
-        st.subheader("📂 Mapa das Despesas Por Área de Gestão")
+        st.subheader("📂 Despesas por Área de Gestão")
         
         def v_gest_info(n, total_r):
             valor = abs(df[(df['valor'] < 0) & (df['gestao'] == n)]['valor'].sum())
@@ -112,59 +109,47 @@ with tab1:
             return f"{n}<br>({pct:.1f}%)", f"R$ {valor:,.2f}"
 
         g1, g2, g3, g4 = st.columns(4)
-        
-        t1, v1 = v_gest_info('Gestão de Pessoas', rec)
-        with g1: caixa_indicador(t1, v1, "#FFFDE7", "#FBC02D")
-        
-        t2, v2 = v_gest_info('Gestão Operacional', rec)
-        with g2: caixa_indicador(t2, v2, "#FFFDE7", "#FBC02D")
-        
-        t3, v3 = v_gest_info('Gestão de Financiamentos', rec)
-        with g3: caixa_indicador(t3, v3, "#FFFDE7", "#FBC02D")
-        
-        t4, v4 = v_gest_info('Infraestrutura e Governança', rec)
-        with g4: caixa_indicador(t4, v4, "#FFFDE7", "#FBC02D")
+        with g1: 
+            t1, v1 = v_gest_info('Gestão de Pessoas', rec)
+            caixa_indicador(t1, v1, "#FFFDE7", "#FBC02D")
+        with g2: 
+            t2, v2 = v_gest_info('Gestão Operacional', rec)
+            caixa_indicador(t2, v2, "#FFFDE7", "#FBC02D")
+        with g3: 
+            t3, v3 = v_gest_info('Gestão de Financiamentos', rec)
+            caixa_indicador(t3, v3, "#FFFDE7", "#FBC02D")
+        with g4: 
+            t4, v4 = v_gest_info('Infraestrutura e Governança', rec)
+            caixa_indicador(t4, v4, "#FFFDE7", "#FBC02D")
 
         st.divider()
 
-        # GRÁFICO FINAL
-        def plot_h_cat(df_in, total_r):
-            temp = df_in[df_in['valor'] < 0].groupby('categoria')['valor'].sum().abs().reset_index().sort_values('valor')
-            if temp.empty: return None
-            temp['pct'] = (temp['valor'] / total_r * 100) if total_r > 0 else 0
-            temp['txt'] = temp.apply(lambda x: f"R$ {x['valor']:,.2f} ({x['pct']:.1f}%)", axis=1)
-            fig = px.bar(temp, x='valor', y='categoria', text='txt', color='categoria', color_discrete_sequence=px.colors.qualitative.Safe, title="🏷️ Detalhamento por Categoria")
-            fig.update_traces(textposition='outside', textfont=dict(color='black', size=13), cliponaxis=False)
-            fig.update_layout(showlegend=False, margin=dict(l=10, r=150, t=50, b=10), height=550, xaxis=dict(showticklabels=False, showgrid=False), yaxis_title=None, xaxis_title=None)
-            return fig
-
-        grafico = plot_h_cat(df, rec)
-        if grafico:
-            st.plotly_chart(grafico, use_container_width=True)
-        else:
-            st.info("Sem despesas categorizadas para este período.")
+        temp_cat = df[df['valor'] < 0].groupby('categoria')['valor'].sum().abs().reset_index().sort_values('valor')
+        if not temp_cat.empty:
+            fig = px.bar(temp_cat, x='valor', y='categoria', text_auto='.2s', title="🏷️ Detalhe por Categoria", orientation='h')
+            st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    st.subheader("🛠️ Editor")
-    search = st.text_input("Buscar transação:")
+    st.subheader("🛠️ Editor de Transações")
+    search = st.text_input("Buscar transação (descrição):")
     df_s = df_raw[df_raw['descricao_original'].str.contains(search, case=False, na=False)] if search else df_raw
     
     if not df_s.empty:
-        # Correção 2: format_func com tratamento para datas nulas (NaN)
+        # Mostra a data bruta se a conversão falhar, evitando erro visual
         sel = st.selectbox(
-            "Selecione:", 
+            "Selecione para editar:", 
             options=df_s.index, 
-            format_func=lambda x: f"{df_s.loc[x,'data_transacao'].strftime('%d/%m') if pd.notnull(df_s.loc[x,'data_transacao']) else 'S/D'} | {df_s.loc[x,'descricao_original']} | R$ {df_s.loc[x,'valor']}"
+            format_func=lambda x: f"{df_s.loc[x,'data_transacao']} | {df_s.loc[x,'descricao_original']} | R$ {df_s.loc[x,'valor']}"
         )
         
         r = df_s.loc[sel]
         c_e1, c_e2 = st.columns(2)
-        with c_e1: n_g = st.selectbox("Gestão:", ["Gestão de Pessoas", "Gestão Operacional", "Gestão de Financiamentos", "Infraestrutura e Governança", "Outras Receitas", "Não Classificado"])
+        with c_e1: n_g = st.selectbox("Gestão:", ["Gestão de Pessoas", "Gestão Operacional", "Gestão de Financiamentos", "Infraestrutura e Governança", "Outras Receitas", "Não Classificado"], index=0)
         with c_e2: n_c = st.text_input("Categoria:", value=str(r['categoria']))
         
-        if st.button("💾 Gravar"):
+        if st.button("💾 Gravar Alteração"):
             supabase.table("fluxo_caixa_ofx").update({"gestao": n_g, "categoria": n_c}).eq("id", r['id']).execute()
-            st.success("Gravado com sucesso!")
+            st.success("Alteração gravada!")
             st.rerun()
             
     st.dataframe(df_s[['data_transacao', 'descricao_original', 'valor', 'gestao', 'categoria']], use_container_width=True)
