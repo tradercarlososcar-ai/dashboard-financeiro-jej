@@ -19,53 +19,24 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# 2. CONFIGURAÇÃO E CSS "BLINDADO" (PARA FORÇAR AS CORES)
+# 2. CONFIGURAÇÃO
 st.set_page_config(page_title="Gestão JEJ", layout="wide")
 
-st.markdown("""
-    <style>
-    /* Estilo para Subtítulos */
-    .section-title {
-        font-size: 22px; font-weight: bold; color: #1E1E1E;
-        margin-top: 30px; margin-bottom: 15px;
-        border-left: 6px solid #333; padding-left: 12px;
-    }
-
-    /* FORÇAR CORES NAS CAIXAS - SELETORES DE ALTA PRIORIDADE */
-    
-    /* BLOCO 1: RECEITA, DESPESA, SALDO */
-    div[data-testid="stHorizontalBlock"]:nth-of-type(1) div[data-testid="stMetric"] {
-        border-radius: 15px !important;
-        padding: 20px !important;
-    }
-    /* Receita - Azul */
-    div[data-testid="column"]:nth-of-type(1) div[data-testid="stMetric"] {
-        background-color: #E3F2FD !important; border: 2px solid #2196F3 !important;
-    }
-    /* Despesa - Vermelho */
-    div[data-testid="column"]:nth-of-type(2) div[data-testid="stMetric"] {
-        background-color: #FFEBEE !important; border: 2px solid #EF5350 !important;
-    }
-    /* Saldo - Verde Musgo */
-    div[data-testid="column"]:nth-of-type(3) div[data-testid="stMetric"] {
-        background-color: #F1F8E9 !important; border: 2px solid #689F38 !important;
-    }
-
-    /* BLOCO 2: GESTÃO (Amarelo Creme) */
-    /* Seleciona colunas a partir da quarta (início da segunda linha de métricas) */
-    div[data-testid="stHorizontalBlock"]:nth-of-type(2) div[data-testid="stMetric"] {
-        background-color: #FFFDE7 !important;
-        border: 2px solid #FBC02D !important;
-        border-radius: 15px !important;
-        padding: 15px !important;
-    }
-
-    /* Títulos e Valores dentro das caixas */
-    [data-testid="stMetricLabel"] p { color: #333 !important; font-weight: bold !important; font-size: 16px !important; }
-    [data-testid="stMetricValue"] div { color: #000 !important; font-weight: 800 !important; }
-
-    .chart-box { border: 1px solid #eeeeee; padding: 20px; border-radius: 12px; background-color: #ffffff; margin-top: 20px; }
-    </style>
+# Função para criar os cards coloridos manualmente (Garante cor e tamanho)
+def caixa_indicador(titulo, valor, cor_fundo, cor_borda):
+    st.markdown(f"""
+        <div style="
+            background-color: {cor_fundo};
+            border: 2px solid {cor_borda};
+            padding: 20px;
+            border-radius: 15px;
+            text-align: left;
+            margin-bottom: 10px;
+            height: 120px;
+        ">
+            <p style="color: #333; margin: 0; font-size: 14px; font-weight: bold;">{titulo}</p>
+            <h2 style="color: #000; margin: 0; font-size: 24px; white-space: nowrap;">{valor}</h2>
+        </div>
     """, unsafe_allow_html=True)
 
 # 3. CONEXÃO
@@ -104,27 +75,28 @@ with tab1:
         m_eng = [k for k,v in meses_pt.items() if v==mes][0]
         df = df_clean[(df_clean['ano']==ano) & (df_clean['mes_nome']==m_eng)].copy()
 
-        # SEÇÃO 1: MAPA RECEITA X DESPESA
-        st.markdown('<p class="section-title">📌 Mapa da Receita x Despesa</p>', unsafe_allow_html=True)
+        # SEÇÃO 1: RECEITA X DESPESA
+        st.subheader("📌 Mapa da Receita x Despesa")
         rec = df[df['valor'] > 0]['valor'].sum()
         desp = df[df['valor'] < 0]['valor'].sum()
         saldo = rec + desp
 
-        col_r1, col_r2, col_r3 = st.columns(3)
-        col_r1.metric("Receitas Reais", f"R$ {rec:,.2f}")
-        col_r2.metric("Despesas Reais", f"R$ {abs(desp):,.2f}")
-        col_r3.metric("Saldo Líquido", f"R$ {saldo:,.2f}")
+        c1, c2, c3 = st.columns(3)
+        with c1: caixa_indicador("Receitas Reais", f"R$ {rec:,.2f}", "#E3F2FD", "#2196F3")
+        with c2: caixa_indicador("Despesas Reais", f"R$ {abs(desp):,.2f}", "#FFEBEE", "#EF5350")
+        with c3: caixa_indicador("Saldo Líquido", f"R$ {saldo:,.2f}", "#F1F8E9", "#689F38")
 
-        # SEÇÃO 2: MAPA GESTÃO
-        st.markdown('<p class="section-title">📂 Mapa das Despesas Por Área de Gestão</p>', unsafe_allow_html=True)
+        # SEÇÃO 2: GESTÃO
+        st.write("")
+        st.subheader("📂 Mapa das Despesas Por Área de Gestão")
         
         def v_gest(n): return abs(df[(df['valor'] < 0) & (df['gestao'] == n)]['valor'].sum())
 
-        col_g1, col_g2, col_g3, col_g4 = st.columns(4)
-        col_g1.metric("Pessoas", f"R$ {v_gest('Gestão de Pessoas'):,.2f}")
-        col_g2.metric("Operacional", f"R$ {v_gest('Gestão Operacional'):,.2f}")
-        col_g3.metric("Financiamentos", f"R$ {v_gest('Gestão de Financiamentos'):,.2f}")
-        col_g4.metric("Infraestrutura", f"R$ {v_gest('Infraestrutura e Governança'):,.2f}")
+        g1, g2, g3, g4 = st.columns(4)
+        with g1: caixa_indicador("Pessoas", f"R$ {v_gest('Gestão de Pessoas'):,.2f}", "#FFFDE7", "#FBC02D")
+        with g2: caixa_indicador("Operacional", f"R$ {v_gest('Gestão Operacional'):,.2f}", "#FFFDE7", "#FBC02D")
+        with g3: caixa_indicador("Financiamentos", f"R$ {v_gest('Gestão de Financiamentos'):,.2f}", "#FFFDE7", "#FBC02D")
+        with g4: caixa_indicador("Infraestrutura", f"R$ {v_gest('Infraestrutura e Governança'):,.2f}", "#FFFDE7", "#FBC02D")
 
         st.divider()
 
@@ -138,13 +110,8 @@ with tab1:
             fig.update_layout(showlegend=False, margin=dict(l=10, r=150, t=50, b=10), height=400, xaxis=dict(showticklabels=False, showgrid=False), yaxis_title=None, xaxis_title=None)
             return fig
 
-        st.markdown('<div class="chart-box">', unsafe_allow_html=True)
         st.plotly_chart(plot_h(df, 'gestao', "📊 Análise Vertical por Área", rec, px.colors.qualitative.Prism), use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown('<div class="chart-box">', unsafe_allow_html=True)
         st.plotly_chart(plot_h(df, 'categoria', "🏷️ Detalhamento por Categoria", rec, px.colors.qualitative.Safe), use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
 
 with tab2:
     st.subheader("🛠️ Editor")
