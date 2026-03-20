@@ -22,20 +22,23 @@ if not check_password(): st.stop()
 # 2. CONFIGURAÇÃO
 st.set_page_config(page_title="Gestão JEJ", layout="wide")
 
-# Função para criar os cards coloridos manualmente (Garante cor e tamanho)
+# Função para criar os cards coloridos manualmente (Ajustada para nomes longos)
 def caixa_indicador(titulo, valor, cor_fundo, cor_borda):
     st.markdown(f"""
         <div style="
             background-color: {cor_fundo};
             border: 2px solid {cor_borda};
-            padding: 20px;
+            padding: 15px;
             border-radius: 15px;
             text-align: left;
             margin-bottom: 10px;
-            height: 120px;
+            height: 160px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         ">
-            <p style="color: #333; margin: 0; font-size: 15px; font-weight: bold;">{titulo}</p>
-            <h2 style="color: #000; margin: 0; font-size: 24px; white-space: nowrap;">{valor}</h2>
+            <p style="color: #333; margin: 0; font-size: 14px; font-weight: bold; line-height: 1.2;">{titulo}</p>
+            <h2 style="color: #000; margin-top: 10px; margin-bottom: 0; font-size: 22px; white-space: nowrap;">{valor}</h2>
         </div>
     """, unsafe_allow_html=True)
 
@@ -88,14 +91,15 @@ with tab1:
         with c2: caixa_indicador("Despesas Reais", f"R$ {abs(desp):,.2f}", "#FFEBEE", "#EF5350")
         with c3: caixa_indicador("Saldo Líquido", f"R$ {saldo:,.2f}", "#F1F8E9", "#689F38")
 
-        # SEÇÃO 2: GESTÃO COM PERCENTUAIS
+        # SEÇÃO 2: GESTÃO COM PERCENTUAIS (Nomes Abreviados se necessário no título)
         st.write("")
         st.subheader("📂 Mapa das Despesas Por Área de Gestão")
         
         def v_gest_info(n, total_r):
             valor = abs(df[(df['valor'] < 0) & (df['gestao'] == n)]['valor'].sum())
             pct = (valor / total_r * 100) if total_r > 0 else 0
-            return f"{n} ({pct:.1f}%)", f"R$ {valor:,.2f}"
+            # Título com quebra de linha manual para o percentual
+            return f"{n}<br>({pct:.1f}%)", f"R$ {valor:,.2f}"
 
         g1, g2, g3, g4 = st.columns(4)
         
@@ -113,7 +117,7 @@ with tab1:
 
         st.divider()
 
-        # GRÁFICO FINAL (APENAS DETALHAMENTO POR CATEGORIA)
+        # GRÁFICO FINAL (DETALHAMENTO POR CATEGORIA)
         def plot_h_cat(df_in, total_r):
             temp = df_in[df_in['valor'] < 0].groupby('categoria')['valor'].sum().abs().reset_index().sort_values('valor')
             temp['pct'] = (temp['valor'] / total_r * 100) if total_r > 0 else 0
