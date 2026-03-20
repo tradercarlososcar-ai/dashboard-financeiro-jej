@@ -34,7 +34,7 @@ def caixa_indicador(titulo, valor, cor_fundo, cor_borda):
             margin-bottom: 10px;
             height: 120px;
         ">
-            <p style="color: #333; margin: 0; font-size: 14px; font-weight: bold;">{titulo}</p>
+            <p style="color: #333; margin: 0; font-size: 15px; font-weight: bold;">{titulo}</p>
             <h2 style="color: #000; margin: 0; font-size: 24px; white-space: nowrap;">{valor}</h2>
         </div>
     """, unsafe_allow_html=True)
@@ -45,14 +45,16 @@ supabase: Client = create_client(url, key)
 
 @st.cache_data(ttl=60)
 def load_data():
-    res = supabase.table("fluxo_caixa_ofx").select("*").execute()
-    df = pd.DataFrame(res.data)
-    if df.empty: return df
-    df['data_transacao'] = pd.to_datetime(df['data_transacao'])
-    df['valor'] = pd.to_numeric(df['valor'])
-    df['ano'] = df['data_transacao'].dt.year
-    df['mes_nome'] = df['data_transacao'].dt.month_name()
-    return df
+    try:
+        res = supabase.table("fluxo_caixa_ofx").select("*").execute()
+        df = pd.DataFrame(res.data)
+        if df.empty: return df
+        df['data_transacao'] = pd.to_datetime(df['data_transacao'])
+        df['valor'] = pd.to_numeric(df['valor'])
+        df['ano'] = df['data_transacao'].dt.year
+        df['mes_nome'] = df['data_transacao'].dt.month_name()
+        return df
+    except: return pd.DataFrame()
 
 df_raw = load_data()
 
@@ -86,32 +88,42 @@ with tab1:
         with c2: caixa_indicador("Despesas Reais", f"R$ {abs(desp):,.2f}", "#FFEBEE", "#EF5350")
         with c3: caixa_indicador("Saldo Líquido", f"R$ {saldo:,.2f}", "#F1F8E9", "#689F38")
 
-        # SEÇÃO 2: GESTÃO
+        # SEÇÃO 2: GESTÃO COM PERCENTUAIS
         st.write("")
         st.subheader("📂 Mapa das Despesas Por Área de Gestão")
         
-        def v_gest(n): return abs(df[(df['valor'] < 0) & (df['gestao'] == n)]['valor'].sum())
+        def v_gest_info(n, total_r):
+            valor = abs(df[(df['valor'] < 0) & (df['gestao'] == n)]['valor'].sum())
+            pct = (valor / total_r * 100) if total_r > 0 else 0
+            return f"{n} ({pct:.1f}%)", f"R$ {valor:,.2f}"
 
         g1, g2, g3, g4 = st.columns(4)
-        with g1: caixa_indicador("Pessoas", f"R$ {v_gest('Gestão de Pessoas'):,.2f}", "#FFFDE7", "#FBC02D")
-        with g2: caixa_indicador("Operacional", f"R$ {v_gest('Gestão Operacional'):,.2f}", "#FFFDE7", "#FBC02D")
-        with g3: caixa_indicador("Financiamentos", f"R$ {v_gest('Gestão de Financiamentos'):,.2f}", "#FFFDE7", "#FBC02D")
-        with g4: caixa_indicador("Infraestrutura", f"R$ {v_gest('Infraestrutura e Governança'):,.2f}", "#FFFDE7", "#FBC02D")
+        
+        t1, v1 = v_gest_info('Gestão de Pessoas', rec)
+        with g1: caixa_indicador(t1, v1, "#FFFDE7", "#FBC02D")
+        
+        t2, v2 = v_gest_info('Gestão Operacional', rec)
+        with g2: caixa_indicador(t2, v2, "#FFFDE7", "#FBC02D")
+        
+        t3, v3 = v_gest_info('Gestão de Financiamentos', rec)
+        with g3: caixa_indicador(t3, v3, "#FFFDE7", "#FBC02D")
+        
+        t4, v4 = v_gest_info('Infraestrutura e Governança', rec)
+        with g4: caixa_indicador(t4, v4, "#FFFDE7", "#FBC02D")
 
         st.divider()
 
-        # GRÁFICOS
-        def plot_h(df_in, col, titulo, total_r, colors):
-            temp = df_in[df_in['valor'] < 0].groupby(col)['valor'].sum().abs().reset_index().sort_values('valor')
+        # GRÁFICO FINAL (APENAS DETALHAMENTO POR CATEGORIA)
+        def plot_h_cat(df_in, total_r):
+            temp = df_in[df_in['valor'] < 0].groupby('categoria')['valor'].sum().abs().reset_index().sort_values('valor')
             temp['pct'] = (temp['valor'] / total_r * 100) if total_r > 0 else 0
             temp['txt'] = temp.apply(lambda x: f"R$ {x['valor']:,.2f} ({x['pct']:.1f}%)", axis=1)
-            fig = px.bar(temp, x='valor', y=col, text='txt', color=col, color_discrete_sequence=colors, title=titulo)
+            fig = px.bar(temp, x='valor', y='categoria', text='txt', color='categoria', color_discrete_sequence=px.colors.qualitative.Safe, title="🏷️ Detalhamento por Categoria")
             fig.update_traces(textposition='outside', textfont=dict(color='black', size=13), cliponaxis=False)
-            fig.update_layout(showlegend=False, margin=dict(l=10, r=150, t=50, b=10), height=400, xaxis=dict(showticklabels=False, showgrid=False), yaxis_title=None, xaxis_title=None)
+            fig.update_layout(showlegend=False, margin=dict(l=10, r=150, t=50, b=10), height=550, xaxis=dict(showticklabels=False, showgrid=False), yaxis_title=None, xaxis_title=None)
             return fig
 
-        st.plotly_chart(plot_h(df, 'gestao', "📊 Análise Vertical por Área", rec, px.colors.qualitative.Prism), use_container_width=True)
-        st.plotly_chart(plot_h(df, 'categoria', "🏷️ Detalhamento por Categoria", rec, px.colors.qualitative.Safe), use_container_width=True)
+        st.plotly_chart(plot_h_cat(df, rec), use_container_width=True)
 
 with tab2:
     st.subheader("🛠️ Editor")
