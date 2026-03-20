@@ -45,16 +45,18 @@ def load_data():
 
 df_raw = load_data()
 
-# 3. INTERFACE
+# 3. INTERFACE E FILTROS
 if df_raw.empty:
     st.warning("⚠️ Sem dados no banco.")
 else:
     st.title("📊 Gestão Financeira JEJ")
     c_f1, c_f2 = st.columns(2)
+    
+    meses_pt = {"January":"Janeiro","February":"Fevereiro","March":"Março","April":"Abril","May":"Maio","June":"Junho","July":"Julho","August":"Agosto","September":"Setembro","October":"Outubro","November":"Novembro","December":"Dezembro"}
+    
     with c_f1:
         ano_sel = st.selectbox("Ano", sorted(df_raw['ano'].unique(), reverse=True))
     with c_f2:
-        meses_pt = {"January":"Janeiro","February":"Fevereiro","March":"Março","April":"Abril","May":"Maio","June":"Junho","July":"Julho","August":"Agosto","September":"Setembro","October":"Outubro","November":"Novembro","December":"Dezembro"}
         m_disp = df_raw[df_raw['ano']==ano_sel]['mes_nome'].unique()
         lista_m = [meses_pt[m] for m in meses_pt if m in m_disp]
         mes_filt = st.selectbox("Mês", lista_m)
@@ -62,24 +64,30 @@ else:
     m_eng = [k for k,v in meses_pt.items() if v==mes_filt][0]
     df = df_raw[(df_raw['ano']==ano_sel) & (df_raw['mes_nome']==m_eng)].copy()
 
+    # --- LÓGICA DE CÁLCULO CORRIGIDA ---
+    # Filtra apenas o que não é transferência interna (BB RENDE FÁCIL) se desejar um saldo real de operação
+    # Para este código, manteremos a soma simples de tudo que está no banco:
+    receitas = df[df['valor'] > 0]['valor'].sum()
+    despesas = df[df['valor'] < 0]['valor'].sum()
+    saldo_real = receitas + despesas
+
     # MÉTRICAS
-    rec, desp = df[df['valor']>0]['valor'].sum(), df[df['valor']<0]['valor'].sum()
     k1, k2, k3 = st.columns(3)
-    k1.metric("Receitas", f"R$ {rec:,.2f}")
-    k2.metric("Despesas", f"R$ {abs(desp):,.2f}")
-    k3.metric("Saldo", f"R$ {(rec+desp):,.2f}")
+    k1.metric("Receitas", f"R$ {receitas:,.2f}")
+    k2.metric("Despesas", f"R$ {abs(despesas):,.2f}", delta_color="inverse")
+    k3.metric("Saldo Líquido", f"R$ {saldo_real:,.2f}", delta=f"{saldo_real:,.2f}")
 
     st.divider()
 
     # GRÁFICOS
     g1, g2 = st.columns(2)
     with g1:
-        st.subheader("📌 Gestão")
-        df_g = df[df['valor']<0].groupby('gestao')['valor'].sum().abs().reset_index()
-        fig1 = px.bar(df_g, x='valor', y='gestao', orientation='h', color_discrete_sequence=['#2C3E50'])
+        st.subheader("📌 Despesas por Gestão")
+        df_g = df[df['valor'] < 0].groupby('gestao')['valor'].sum().abs().reset_index()
+        fig1 = px.bar(df_g, x='valor', y='gestao', orientation='h', color_discrete_sequence=['#E74C3C'])
         st.plotly_chart(fig1, use_container_width=True)
     with g2:
-        st.subheader("🍩 Categoria")
-        df_c = df[df['valor']<0].groupby('categoria')['valor'].sum().abs().reset_index()
-        fig2 = px.pie(df_c, values='valor', names='categoria', hole=0.4)
+        st.subheader("🍩 Despesas por Categoria")
+        df_c = df[df['valor'] < 0].groupby('categoria')['valor'].sum().abs().reset_index()
+        fig2 = px.pie(df_c, values='valor', names='categoria', hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
         st.plotly_chart(fig2, use_container_width=True)
