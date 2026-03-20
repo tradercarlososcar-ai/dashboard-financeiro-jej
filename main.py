@@ -11,101 +11,75 @@ def check_password():
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
-
     if "password_correct" not in st.session_state:
         st.title("🔒 Acesso Restrito - JEJ")
-        st.text_input("Digite a senha de acesso para visualizar o painel:", type="password", on_change=password_entered, key="password")
+        st.text_input("Senha:", type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
         st.title("🔒 Acesso Restrito - JEJ")
-        st.text_input("Digite a senha de acesso para visualizar o painel:", type="password", on_change=password_entered, key="password")
-        st.error("😕 Senha incorreta. Tente novamente.")
+        st.text_input("Senha:", type="password", on_change=password_entered, key="password")
+        st.error("Senha incorreta.")
         return False
-    else:
-        return True
+    return True
 
 if not check_password():
-    st.stop() # Interrompe o carregamento se a senha estiver errada
+    st.stop()
 
-# 2. CONFIGURAÇÃO VISUAL DO PAINEL
+# 2. CONFIGURAÇÃO E CONEXÃO
 st.set_page_config(page_title="Gestão Financeira JEJ", layout="wide")
-
-# Estilo para os Cards (Métricas)
-st.markdown("""
-    <style>
-    [data-testid="stMetricValue"] { font-size: 28px; font-weight: bold; }
-    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 8px; border: 1px solid #e1e4e8; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# 3. CONEXÃO COM O SUPABASE
-url = st.secrets["SUPABASE_URL"]
-key = st.secrets["SUPABASE_KEY"]
+url, key = st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(url, key)
 
-@st.cache_data(ttl=600) # Atualiza os dados a cada 10 minutos
+@st.cache_data(ttl=600)
 def load_data():
     try:
-        response = supabase.table("fluxo_caixa_ofx").select("*").execute()
-        df = pd.DataFrame(response.data)
-        if df.empty:
-            return df
-        
-        # Converte tipos e datas
+        res = supabase.table("fluxo_caixa_ofx").select("*").execute()
+        df = pd.DataFrame(res.data)
+        if df.empty: return df
         df['data_transacao'] = pd.to_datetime(df['data_transacao'])
         df['valor'] = pd.to_numeric(df['valor'])
         df['ano'] = df['data_transacao'].dt.year
         df['mes_nome'] = df['data_transacao'].dt.month_name()
         return df
-    except Exception as e:
-        st.error(f"Erro ao carregar dados do banco: {e}")
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 df_raw = load_data()
 
-# 4. INTERFACE E FILTROS
+# 3. INTERFACE
 if df_raw.empty:
-    st.warning("⚠️ O banco de dados está vazio ou inacessível.")
+    st.warning("⚠️ Sem dados no banco.")
 else:
-    st.title("📊 Painel Gestão Financeira JEJ")
-    
-    # Linha de Filtros (Ano e Mês)
-    col_f1, col_f2 = st.columns(2)
-    
-    with col_f1:
-        ano_sel = st.selectbox("Selecione o Ano", sorted(df_raw['ano'].unique(), reverse=True))
-    
-    with col_f2:
-        # Dicionário para tradução dos meses
-        meses_pt = {"January": "Janeiro", "February": "Fevereiro", "March": "Março", "April": "Abril", "May": "Maio", "June": "Junho", "July": "Julho", "August": "Agosto", "September": "Setembro", "October": "Outubro", "November": "Novembro", "December": "Dezembro"}
-        
-        # Filtra meses que possuem dados para o ano selecionado
-        meses_disponiveis_eng = df_raw[df_raw['ano'] == ano_sel]['mes_nome'].unique()
-        lista_meses_exibir = [meses_pt[m] for m in meses_pt if m in meses_disponiveis_eng]
-        
-        mes_filt = st.selectbox("Selecione o Mês", lista_meses_exibir)
+    st.title("📊 Gestão Financeira JEJ")
+    c_f1, c_f2 = st.columns(2)
+    with c_f1:
+        ano_sel = st.selectbox("Ano", sorted(df_raw['ano'].unique(), reverse=True))
+    with c_f2:
+        meses_pt = {"January":"Janeiro","February":"Fevereiro","March":"Março","April":"Abril","May":"Maio","June":"Junho","July":"Julho","August":"Agosto","September":"Setembro","October":"Outubro","November":"Novembro","December":"Dezembro"}
+        m_disp = df_raw[df_raw['ano']==ano_sel]['mes_nome'].unique()
+        lista_m = [meses_pt[m] for m in meses_pt if m in m_disp]
+        mes_filt = st.selectbox("Mês", lista_m)
 
-    # Filtragem Final dos Dados conforme seleção do usuário
-    mes_eng_final = [k for k, v in meses_pt.items() if v == mes_filt][0]
-    df_mes = df_raw[(df_raw['ano'] == ano_sel) & (df_raw['mes_nome'] == mes_eng_final)].copy()
+    m_eng = [k for k,v in meses_pt.items() if v==mes_filt][0]
+    df = df_raw[(df_raw['ano']==ano_sel) & (df_raw['mes_nome']==m_eng)].copy()
 
-    # 5. CARDS DE RESULTADOS (MÉTRICAS)
-    receitas = df_mes[df_mes['valor'] > 0]['valor'].sum()
-    despesas = df_mes[df_mes['valor'] < 0]['valor'].sum()
-    saldo = receitas + despesas
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Receitas", f"R$ {receitas:,.2f}")
-    c2.metric("Total Despesas", f"R$ {abs(despesas):,.2f}")
-    c3.metric("Saldo Líquido", f"R$ {saldo:,.2f}", delta=f"{saldo:,.2f}")
+    # MÉTRICAS
+    rec, desp = df[df['valor']>0]['valor'].sum(), df[df['valor']<0]['valor'].sum()
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Receitas", f"R$ {rec:,.2f}")
+    k2.metric("Despesas", f"R$ {abs(desp):,.2f}")
+    k3.metric("Saldo", f"R$ {(rec+desp):,.2f}")
 
     st.divider()
 
-    # 6. GRÁFICOS INTERATIVOS
+    # GRÁFICOS
     g1, g2 = st.columns(2)
-
     with g1:
-        st.subheader("📌 Por Área de Gestão")
-        # Agrupa apenas despesas para o gráfico de gestão
-        df_gestao = df_mes[df_mes['valor'] < 0].groupby('gestao')['valor'].sum().abs().reset_index()
-        fig_gestao = px.bar(df_gestao.sort_values('
+        st.subheader("📌 Gestão")
+        df_g = df[df['valor']<0].groupby('gestao')['valor'].sum().abs().reset_index()
+        fig1 = px.bar(df_g, x='valor', y='gestao', orientation='h', color_discrete_sequence=['#2C3E50'])
+        st.plotly_chart(fig1, use_container_width=True)
+    with g2:
+        st.subheader("🍩 Categoria")
+        df_c = df[df['valor']<0].groupby('categoria')['valor'].sum().abs().reset_index()
+        fig2 = px.pie(df_c, values='valor', names='categoria', hole=0.4)
+        st.plotly_chart(fig2, use_container_width=True)
