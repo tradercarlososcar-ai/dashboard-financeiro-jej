@@ -22,7 +22,7 @@ if not check_password(): st.stop()
 # 2. CONFIGURAÇÃO
 st.set_page_config(page_title="Gestão JEJ", layout="wide")
 
-# Função para criar os cards coloridos manualmente (Ajustada para nomes longos)
+# Função para criar os cards coloridos
 def caixa_indicador(titulo, valor, cor_fundo, cor_borda):
     st.markdown(f"""
         <div style="
@@ -52,12 +52,20 @@ def load_data():
         res = supabase.table("fluxo_caixa_ofx").select("*").execute()
         df = pd.DataFrame(res.data)
         if df.empty: return df
-        df['data_transacao'] = pd.to_datetime(df['data_transacao'])
-        df['valor'] = pd.to_numeric(df['valor'])
-        df['ano'] = df['data_transacao'].dt.year
+        
+        # Correção 1: Garantir conversão de data sem quebrar o app em caso de erro
+        df['data_transacao'] = pd.to_datetime(df['data_transacao'], errors='coerce')
+        df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
+        
+        # Remover linhas onde a data é nula para não quebrar os filtros de ano/mês
+        df = df.dropna(subset=['data_transacao'])
+        
+        df['ano'] = df['data_transacao'].dt.year.astype(int)
         df['mes_nome'] = df['data_transacao'].dt.month_name()
         return df
-    except: return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Erro ao carregar dados: {e}")
+        return pd.DataFrame()
 
 df_raw = load_data()
 
@@ -73,9 +81,12 @@ with tab1:
     if not df_clean.empty:
         with st.sidebar:
             st.header("Seleção")
-            ano = st.selectbox("Ano", sorted(df_clean['ano'].unique(), reverse=True))
+            anos_disponiveis = sorted(df_clean['ano'].unique(), reverse=True)
+            ano = st.selectbox("Ano", anos_disponiveis)
+            
             m_disp = df_clean[df_clean['ano']==ano]['mes_nome'].unique()
-            mes = st.selectbox("Mês", [meses_pt[m] for m in meses_pt if m in m_disp])
+            lista_meses = [meses_pt[m] for m in meses_pt if m in m_disp]
+            mes = st.selectbox("Mês", lista_meses)
 
         m_eng = [k for k,v in meses_pt.items() if v==mes][0]
         df = df_clean[(df_clean['ano']==ano) & (df_clean['mes_nome']==m_eng)].copy()
@@ -91,14 +102,13 @@ with tab1:
         with c2: caixa_indicador("Despesas Reais", f"R$ {abs(desp):,.2f}", "#FFEBEE", "#EF5350")
         with c3: caixa_indicador("Saldo Líquido", f"R$ {saldo:,.2f}", "#F1F8E9", "#689F38")
 
-        # SEÇÃO 2: GESTÃO COM PERCENTUAIS (Nomes Abreviados se necessário no título)
+        # SEÇÃO 2: GESTÃO COM PERCENTUAIS
         st.write("")
         st.subheader("📂 Mapa das Despesas Por Área de Gestão")
         
         def v_gest_info(n, total_r):
             valor = abs(df[(df['valor'] < 0) & (df['gestao'] == n)]['valor'].sum())
             pct = (valor / total_r * 100) if total_r > 0 else 0
-            # Título com quebra de linha manual para o percentual
             return f"{n}<br>({pct:.1f}%)", f"R$ {valor:,.2f}"
 
         g1, g2, g3, g4 = st.columns(4)
@@ -117,9 +127,10 @@ with tab1:
 
         st.divider()
 
-        # GRÁFICO FINAL (DETALHAMENTO POR CATEGORIA)
+        # GRÁFICO FINAL
         def plot_h_cat(df_in, total_r):
             temp = df_in[df_in['valor'] < 0].groupby('categoria')['valor'].sum().abs().reset_index().sort_values('valor')
+            if temp.empty: return None
             temp['pct'] = (temp['valor'] / total_r * 100) if total_r > 0 else 0
             temp['txt'] = temp.apply(lambda x: f"R$ {x['valor']:,.2f} ({x['pct']:.1f}%)", axis=1)
             fig = px.bar(temp, x='valor', y='categoria', text='txt', color='categoria', color_discrete_sequence=px.colors.qualitative.Safe, title="🏷️ Detalhamento por Categoria")
@@ -127,19 +138,33 @@ with tab1:
             fig.update_layout(showlegend=False, margin=dict(l=10, r=150, t=50, b=10), height=550, xaxis=dict(showticklabels=False, showgrid=False), yaxis_title=None, xaxis_title=None)
             return fig
 
-        st.plotly_chart(plot_h_cat(df, rec), use_container_width=True)
+        grafico = plot_h_cat(df, rec)
+        if grafico:
+            st.plotly_chart(grafico, use_container_width=True)
+        else:
+            st.info("Sem despesas categorizadas para este período.")
 
 with tab2:
     st.subheader("🛠️ Editor")
     search = st.text_input("Buscar transação:")
     df_s = df_raw[df_raw['descricao_original'].str.contains(search, case=False, na=False)] if search else df_raw
+    
     if not df_s.empty:
-        sel = st.selectbox("Selecione:", options=df_s.index, format_func=lambda x: f"{df_s.loc[x,'data_transacao'].strftime('%d/%m')} | {df_s.loc[x,'descricao_original']} | R$ {df_s.loc[x,'valor']}")
+        # Correção 2: format_func com tratamento para datas nulas (NaN)
+        sel = st.selectbox(
+            "Selecione:", 
+            options=df_s.index, 
+            format_func=lambda x: f"{df_s.loc[x,'data_transacao'].strftime('%d/%m') if pd.notnull(df_s.loc[x,'data_transacao']) else 'S/D'} | {df_s.loc[x,'descricao_original']} | R$ {df_s.loc[x,'valor']}"
+        )
+        
         r = df_s.loc[sel]
         c_e1, c_e2 = st.columns(2)
-        with c_e1: n_g = st.selectbox("Gestão:", ["Gestão de Pessoas", "Gestão Operacional", "Gestão de Financiamentos", "Infraestrutura e Governança", "Outras Receitas"])
-        with c_e2: n_c = st.text_input("Categoria:", value=r['categoria'])
+        with c_e1: n_g = st.selectbox("Gestão:", ["Gestão de Pessoas", "Gestão Operacional", "Gestão de Financiamentos", "Infraestrutura e Governança", "Outras Receitas", "Não Classificado"])
+        with c_e2: n_c = st.text_input("Categoria:", value=str(r['categoria']))
+        
         if st.button("💾 Gravar"):
             supabase.table("fluxo_caixa_ofx").update({"gestao": n_g, "categoria": n_c}).eq("id", r['id']).execute()
+            st.success("Gravado com sucesso!")
             st.rerun()
+            
     st.dataframe(df_s[['data_transacao', 'descricao_original', 'valor', 'gestao', 'categoria']], use_container_width=True)
