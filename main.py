@@ -1,3 +1,6 @@
+import streamlit as st
+@st.cache_data(ttl=60)
+def sua_funcao_aqui():
 @st.cache_data(ttl=60)
 def load_data():
     try:
