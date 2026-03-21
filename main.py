@@ -83,7 +83,7 @@ with aba1:
         
         st.divider()
 
-        # --- LINHA 2: MELHORIA SIGNIFICATIVA - ÁREAS DE GESTÃO ---
+        # --- LINHA 2: NOVO GRID LAYOUT FIXO (MELHORIA ESTÉTICA FINAL) ---
         st.write("### 🏗️ Despesas por Área de Gestão")
         
         df_gastos = df[df['valor'] < 0].copy()
@@ -92,27 +92,51 @@ with aba1:
         total_periodo = df_gastos['valor_abs'].sum()
 
         if not resumo_gestao.empty:
-            colunas = st.columns(len(resumo_gestao))
-            for i, (nome, valor) in enumerate(resumo_gestao.items()):
-                with colunas[i]:
+            # Estrutura de Grid: 2 Fileiras x 4 Colunas = 8 Slots para cards quadrados
+            
+            # --- FILEIRA 1 (TOP 4 GASTOS) ---
+            c1_f1, c2_f1, c3_f1, c4_f1 = st.columns(4)
+            slots_f1 = [c1_f1, c2_f1, c3_f1, c4_f1]
+            
+            # --- FILEIRA 2 (OUTROS 4 GASTOS) ---
+            c1_f2, c2_f2, c3_f2, c4_f2 = st.columns(4)
+            slots_f2 = [c1_f2, c2_f2, c3_f2, c4_f2]
+            
+            # Combina todos os slots em uma única lista ordenada de 1 a 8
+            todos_slots = slots_f1 + slots_f2
+            
+            # 2. Loop que preenche a grade com os dados ordenados do maior para o menor gasto
+            for i, slot in enumerate(todos_slots):
+                # Se ainda houver dados para preencher o slot
+                if i < len(resumo_gestao):
+                    nome, valor = resumo_gestao.index[i], resumo_gestao.values[i]
                     pct = (valor / total_periodo) * 100
                     
-                    # Lógica de Cor Inovadora (Semafórica)
-                    if pct > 50: color = "#FF4B4B" # Vermelho (Crítico)
-                    elif pct > 20: color = "#FFAA00" # Laranja (Atenção)
+                    # Lógica de Cor Semafórica Baseada no Gasto Total (Gargalos Financeiros)
+                    if pct > 40: color = "#FF4B4B" # Vermelho (Crítico - Acima de 40%)
+                    elif pct > 15: color = "#FFAA00" # Laranja (Atenção - Acima de 15%)
+                    elif pct > 5: color = "#FFE000" # Amarelo (Moderado - Acima de 5%)
                     else: color = "#00CC96" # Verde (Controlado)
                     
-                    with st.container(border=True):
-                        st.markdown(f"**{nome.upper()}**")
-                        st.metric(label=f"{pct:.1f}% do total", value=f"R$ {valor:,.2f}")
-                        # Barra de progresso customizada em HTML/CSS
-                        st.markdown(f'''
-                            <div style="background-color: #e0e0e0; border-radius: 10px; height: 8px; width: 100%;">
-                                <div style="background-color: {color}; height: 8px; width: {pct}%; border-radius: 10px;"></div>
-                            </div>
-                        ''', unsafe_allow_html=True)
-                        st.caption("Participação nos gastos")
-        
+                    # Preenche o slot com o contêiner quadrado
+                    with slot:
+                        with st.container(border=True):
+                            st.markdown(f"**{nome.upper()}**")
+                            # Métrica Financeira Padrão
+                            st.metric(label=f"{pct:.1f}% do total", value=f"R$ {valor:,.2f}")
+                            # Barra de progresso customizada em HTML/CSS para estética
+                            st.markdown(f'''
+                                <div style="background-color: #e0e0e0; border-radius: 10px; height: 8px; width: 100%;">
+                                    <div style="background-color: {color}; height: 8px; width: {pct}%; border-radius: 10px;"></div>
+                                </div>
+                            ''', unsafe_allow_html=True)
+                            st.caption("Visualização de Gargalos de Gasto")
+                            
+                # Se não houver dados para este slot, ele fica vazio para manter o alinhamento de grade
+                else:
+                    with slot:
+                        st.write("") # Mantém o espaço para o card quadrado
+
         st.divider()
 
         # --- LINHA 3: GRÁFICO DE CATEGORIAS ---
