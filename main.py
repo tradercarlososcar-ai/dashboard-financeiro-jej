@@ -9,7 +9,6 @@ st.set_page_config(page_title="Gestão Financeira J&J", layout="wide", initial_s
 # --- ESTILIZAÇÃO CSS PARA PADRONIZAR OS CARDS ---
 st.markdown("""
     <style>
-    /* Reduz a fonte do título do card e fixa a altura para evitar desalinhamento */
     .card-title {
         font-size: 11px !important;
         font-weight: bold;
@@ -20,12 +19,17 @@ st.markdown("""
         text-transform: uppercase;
         margin-bottom: 5px;
     }
-    /* Padroniza o container do metric */
     [data-testid="stMetricValue"] {
         font-size: 1.4rem !important;
     }
     [data-testid="stMetricLabel"] {
         font-size: 0.8rem !important;
+    }
+    /* Estilo para os botões de seleção na sidebar */
+    div.stButtonGroup > div {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -52,7 +56,15 @@ def load_data():
         df['data_transacao_dt'] = pd.to_datetime(df['data_transacao'], errors='coerce')
         df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
         df['ano'] = df['data_transacao_dt'].dt.year.fillna(0).astype(int)
-        df['mes_nome'] = df['data_transacao_dt'].dt.month_name()
+        
+        # Tradução dos meses para Português
+        meses_map = {
+            'January': 'Janeiro', 'February': 'Fevereiro', 'March': 'Março', 
+            'April': 'Abril', 'May': 'Maio', 'June': 'Junho', 
+            'July': 'Julho', 'August': 'Agosto', 'September': 'Setembro', 
+            'October': 'Outubro', 'November': 'Novembro', 'December': 'Dezembro'
+        }
+        df['mes_nome'] = df['data_transacao_dt'].dt.month_name().map(meses_map)
         
         if 'classificacao' not in df.columns:
             df['classificacao'] = None
@@ -64,23 +76,31 @@ def load_data():
  
 df_raw = load_data()
  
-# 3. BARRA LATERAL E FILTROS
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/5571/5571404.png", width=100)
-st.sidebar.title("Filtros")
+# 3. BARRA LATERAL (REFORMULADA COM BOTÕES/PILLS)
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/5571/5571404.png", width=80)
+st.sidebar.title("Filtros de Navegação")
  
 if not df_raw.empty:
+    # Filtro de Ano em formato de botões
     anos = sorted(df_raw['ano'].unique(), reverse=True)
-    ano_sel = st.sidebar.selectbox("Ano de Referência", anos)
+    st.sidebar.write("**Ano de Referência**")
+    ano_sel = st.sidebar.pills("Selecione o Ano", anos, selection_mode="single", default=anos[0], label_visibility="collapsed")
     
-    meses_disponiveis = df_raw[df_raw['ano'] == ano_sel]['mes_nome'].unique()
-    mes_sel = st.sidebar.multiselect("Meses", meses_disponiveis, default=meses_disponiveis)
+    # Filtro de Meses em formato de botões (Tradução já aplicada no carregamento)
+    meses_ordem = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
+                   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+    meses_existentes = [m for m in meses_ordem if m in df_raw[df_raw['ano'] == ano_sel]['mes_nome'].unique()]
+    
+    st.sidebar.write("**Meses**")
+    mes_sel = st.sidebar.pills("Selecione os Meses", meses_existentes, selection_mode="multi", default=meses_existentes, label_visibility="collapsed")
 
-    tipos_no_banco = df_raw['classificacao'].unique().tolist()
-    tipos_filtros = [t for t in tipos_no_banco if t is not None]
-    if not tipos_filtros: tipos_filtros = ["Receita", "Despesa"]
-        
-    tipo_sel = st.sidebar.multiselect("Tipo de Transação", tipos_filtros, default=tipos_filtros)
+    # Filtro de Classificação
+    st.sidebar.write("**Tipo de Transação**")
+    tipos_no_banco = [t for t in df_raw['classificacao'].unique().tolist() if t is not None]
+    if not tipos_no_banco: tipos_no_banco = ["Receita", "Despesa"]
+    tipo_sel = st.sidebar.pills("Tipo", tipos_no_banco, selection_mode="multi", default=tipos_no_banco, label_visibility="collapsed")
     
+    # Aplicação da máscara de filtro
     mask = (df_raw['ano'] == ano_sel) & (df_raw['mes_nome'].isin(mes_sel))
     if any(df_raw['classificacao'].notnull()):
         mask = mask & (df_raw['classificacao'].isin(tipo_sel))
@@ -116,7 +136,7 @@ with aba1:
         
         st.divider()
  
-        # --- LINHA 2: GRID DE GESTÃO (COM CSS PADRONIZADO) ---
+        # --- LINHA 2: GRID DE GESTÃO ---
         st.write("### 🏗️ Despesas por Gestão")
         
         df_gastos = df[df['valor'] < 0].copy()
@@ -133,7 +153,6 @@ with aba1:
                     nome, valor = resumo_gestao.index[i], resumo_gestao.values[i]
                     pct = (valor / total_periodo) * 100 if total_periodo > 0 else 0
                     
-                    # Cores baseadas nas Regras do PDF [cite: 2, 3, 5, 7]
                     if pct > 40: color = "#FF4B4B"
                     elif pct > 15: color = "#FFAA00"
                     elif pct > 5: color = "#FFE000"
@@ -141,7 +160,6 @@ with aba1:
                     
                     with slot:
                         with st.container(border=True):
-                            # Título com classe CSS customizada para manter o tamanho igual
                             st.markdown(f'<div class="card-title">{nome}</div>', unsafe_allow_html=True)
                             st.metric(label=f"{pct:.1f}% do total", value=f"R$ {valor:,.2f}")
                             st.markdown(f'''<div style="background-color:#e0e0e0;border-radius:10px;height:6px;width:100%;"><div style="background-color:{color};height:8px;width:{pct}%;border-radius:10px;"></div></div>''', unsafe_allow_html=True)
@@ -158,7 +176,7 @@ with aba1:
             fig.update_layout(yaxis={'categoryorder':'total ascending'}, showlegend=False, height=450)
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Aguardando seleção de filtros...")
+        st.info("Nenhum dado para os filtros selecionados.")
  
 with aba2:
     st.write("### 📝 Tabela de Movimentações")
