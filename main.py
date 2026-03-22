@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from supabase import create_client
-
+ 
 # 1. CONFIGURAÇÕES DE PÁGINA E CONEXÃO
 st.set_page_config(page_title="Gestão Financeira J&J", layout="wide", initial_sidebar_state="expanded")
-
+ 
 # Inicialização do Supabase através das Secrets do Streamlit
 try:
     url = st.secrets["SUPABASE_URL"]
@@ -14,7 +14,7 @@ try:
 except Exception as e:
     st.error(f"Erro ao carregar credenciais do Supabase: {e}")
     st.stop()
-
+ 
 # 2. MOTOR DE DADOS COM CACHE
 @st.cache_data(ttl=60)
 def load_data():
@@ -33,44 +33,59 @@ def load_data():
         df['ano'] = df['data_transacao_dt'].dt.year.fillna(0).astype(int)
         df['mes_nome'] = df['data_transacao_dt'].dt.month_name()
         
+        # Garante que a coluna classificacao exista (evita erro se o BD estiver vazio)
+        if 'classificacao' not in df.columns:
+            df['classificacao'] = None
+            
         return df
     except Exception as e:
         st.error(f"Erro na conexão com o banco: {e}")
         return pd.DataFrame()
-
+ 
 # Carga inicial
 df_raw = load_data()
-
+ 
 # 3. BARRA LATERAL E FILTROS
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/5571/5571404.png", width=100)
 st.sidebar.title("Filtros")
-
+ 
 if not df_raw.empty:
     anos = sorted(df_raw['ano'].unique(), reverse=True)
     ano_sel = st.sidebar.selectbox("Ano de Referência", anos)
     
     meses_disponiveis = df_raw[df_raw['ano'] == ano_sel]['mes_nome'].unique()
     mes_sel = st.sidebar.multiselect("Meses", meses_disponiveis, default=meses_disponiveis)
+
+    # NOVO FILTRO: Tipo de Transação (Receita/Despesa)
+    tipos_disponiveis = df_raw['classificacao'].unique().tolist()
+    # Remove valores nulos da lista de filtros visual
+    tipos_filtros = [t for t in tipos_disponiveis if t is not None]
+    tipo_sel = st.sidebar.multiselect("Tipo de Transação", tipos_filtros, default=tipos_filtros)
     
-    # DataFrame Filtrado para o Dashboard
-    df = df_raw[(df_raw['ano'] == ano_sel) & (df_raw['mes_nome'].isin(mes_sel))]
+    # DataFrame Filtrado para o Dashboard (Incluindo o novo filtro)
+    df = df_raw[
+        (df_raw['ano'] == ano_sel) & 
+        (df_raw['mes_nome'].isin(mes_sel)) &
+        (df_raw['classificacao'].isin(tipo_sel))
+    ]
 else:
     df = df_raw
     st.sidebar.warning("Nenhum dado encontrado no banco.")
-
+ 
 # 4. TÍTULO PRINCIPAL
 st.title("📊 Painel de Gestão Financeira")
 st.markdown("#### **J&J PERFURAÇÕES MND**")
 st.divider()
-
+ 
 # DEFINIÇÃO DAS ABAS
 aba1, aba2 = st.tabs(["📈 Dashboard Executivo", "📂 Gestão de Dados"])
-
+ 
 with aba1:
     if not df.empty:
         # --- LINHA 1: KPIS DE ALTO NÍVEL ---
-        receitas = df[df['valor'] > 0]['valor'].sum()
-        despesas = df[df['valor'] < 0]['valor'].sum()
+        # Agora calculando com base na coluna oficial de classificacao
+        receitas = df[df['classificacao'] == 'Receita']['valor'].sum()
+        despesas = df[df['classificacao'] == 'Despesa']['valor'].sum()
         saldo = receitas + despesas
         
         c1, c2, c3 = st.columns(3)
@@ -82,15 +97,16 @@ with aba1:
             st.metric("RESULTADO LÍQUIDO", f"R$ {saldo:,.2f}", delta="Saldo no Período", delta_color="normal" if saldo >= 0 else "inverse")
         
         st.divider()
-
+ 
         # --- LINHA 2: NOVO GRID LAYOUT FIXO (MELHORIA ESTÉTICA FINAL) ---
         st.write("### 🏗️ Despesas por Área de Gestão")
         
-        df_gastos = df[df['valor'] < 0].copy()
+        # Filtramos apenas as despesas para os cards de gestão
+        df_gastos = df[df['classificacao'] == 'Despesa'].copy()
         df_gastos['valor_abs'] = df_gastos['valor'].abs()
         resumo_gestao = df_gastos.groupby('gestao')['valor_abs'].sum().sort_values(ascending=False)
         total_periodo = df_gastos['valor_abs'].sum()
-
+ 
         if not resumo_gestao.empty:
             # Estrutura de Grid: 2 Fileiras x 4 Colunas = 8 Slots para cards quadrados
             
@@ -136,9 +152,9 @@ with aba1:
                 else:
                     with slot:
                         st.write("") # Mantém o espaço para o card quadrado
-
+ 
         st.divider()
-
+ 
         # --- LINHA 3: GRÁFICO DE CATEGORIAS ---
         st.write("### 🏷️ Despesas por Categorias (Top 10)")
         top_categorias = df_gastos.groupby('categoria')['valor_abs'].sum().nlargest(10).reset_index()
@@ -154,20 +170,21 @@ with aba1:
         )
         fig.update_layout(yaxis={'categoryorder':'total ascending'}, showlegend=False, height=450)
         st.plotly_chart(fig, use_container_width=True)
-
+ 
     else:
         st.info("Selecione um período nos filtros laterais para visualizar o dashboard.")
-
+ 
 with aba2:
     st.write("### 📝 Tabela de Movimentações")
     if not df_raw.empty:
         # Editor de dados interativo
         st.data_editor(
             df_raw,
-            column_order=("data_transacao", "descricao_original", "valor", "gestao", "categoria"),
+            column_order=("data_transacao", "descricao_original", "valor", "classificacao", "gestao", "categoria"),
             column_config={
                 "data_transacao": "Data",
                 "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
+                "classificacao": st.column_config.SelectboxColumn("Tipo", options=["Receita", "Despesa"]),
                 "gestao": st.column_config.SelectboxColumn("Área", options=["Operacional", "Administrativo", "Pessoal", "Financeiro"]),
                 "categoria": "Categoria"
             },
