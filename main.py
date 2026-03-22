@@ -5,8 +5,32 @@ from supabase import create_client
  
 # 1. CONFIGURAÇÕES DE PÁGINA E CONEXÃO
 st.set_page_config(page_title="Gestão Financeira J&J", layout="wide", initial_sidebar_state="expanded")
+
+# --- ESTILIZAÇÃO CSS PARA PADRONIZAR OS CARDS ---
+st.markdown("""
+    <style>
+    /* Reduz a fonte do título do card e fixa a altura para evitar desalinhamento */
+    .card-title {
+        font-size: 11px !important;
+        font-weight: bold;
+        height: 35px;
+        display: flex;
+        align-items: center;
+        line-height: 1.2;
+        text-transform: uppercase;
+        margin-bottom: 5px;
+    }
+    /* Padroniza o container do metric */
+    [data-testid="stMetricValue"] {
+        font-size: 1.4rem !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.8rem !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
  
-# Inicialização do Supabase através das Secrets do Streamlit
+# Inicialização do Supabase
 try:
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
@@ -25,15 +49,11 @@ def load_data():
         if df.empty:
             return df
             
-        # Tratamento de tipos de dados
         df['data_transacao_dt'] = pd.to_datetime(df['data_transacao'], errors='coerce')
         df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
-        
-        # Colunas de apoio para filtros
         df['ano'] = df['data_transacao_dt'].dt.year.fillna(0).astype(int)
         df['mes_nome'] = df['data_transacao_dt'].dt.month_name()
         
-        # Blindagem: Garante que a coluna classificacao exista
         if 'classificacao' not in df.columns:
             df['classificacao'] = None
             
@@ -42,7 +62,6 @@ def load_data():
         st.error(f"Erro na conexão com o banco: {e}")
         return pd.DataFrame()
  
-# Carga inicial
 df_raw = load_data()
  
 # 3. BARRA LATERAL E FILTROS
@@ -56,11 +75,9 @@ if not df_raw.empty:
     meses_disponiveis = df_raw[df_raw['ano'] == ano_sel]['mes_nome'].unique()
     mes_sel = st.sidebar.multiselect("Meses", meses_disponiveis, default=meses_disponiveis)
 
-    # Filtro de Classificação
     tipos_no_banco = df_raw['classificacao'].unique().tolist()
     tipos_filtros = [t for t in tipos_no_banco if t is not None]
-    if not tipos_filtros:
-        tipos_filtros = ["Receita", "Despesa"]
+    if not tipos_filtros: tipos_filtros = ["Receita", "Despesa"]
         
     tipo_sel = st.sidebar.multiselect("Tipo de Transação", tipos_filtros, default=tipos_filtros)
     
@@ -71,14 +88,13 @@ if not df_raw.empty:
     df = df_raw[mask]
 else:
     df = df_raw
-    st.sidebar.warning("Nenhum dado encontrado no banco.")
+    st.sidebar.warning("Nenhum dado encontrado.")
  
 # 4. TÍTULO PRINCIPAL
 st.title("📊 Painel de Gestão Financeira")
 st.markdown("#### **J&J PERFURAÇÕES MND**")
 st.divider()
  
-# DEFINIÇÃO DAS ABAS
 aba1, aba2 = st.tabs(["📈 Dashboard Executivo", "📂 Gestão de Dados"])
  
 with aba1:
@@ -100,28 +116,24 @@ with aba1:
         
         st.divider()
  
-        # --- LINHA 2: GRID LAYOUT (GESTÃO) ---
+        # --- LINHA 2: GRID DE GESTÃO (COM CSS PADRONIZADO) ---
         st.write("### 🏗️ Despesas por Gestão")
         
-        if 'classificacao' in df.columns and df['classificacao'].notnull().any():
-            df_gastos = df[df['classificacao'] == 'Despesa'].copy()
-        else:
-            df_gastos = df[df['valor'] < 0].copy()
-            
+        df_gastos = df[df['valor'] < 0].copy()
         df_gastos['valor_abs'] = df_gastos['valor'].abs()
         resumo_gestao = df_gastos.groupby('gestao')['valor_abs'].sum().sort_values(ascending=False)
         total_periodo = df_gastos['valor_abs'].sum()
  
         if not resumo_gestao.empty:
-            c1_f1, c2_f1, c3_f1, c4_f1 = st.columns(4)
-            c1_f2, c2_f2, c3_f2, c4_f2 = st.columns(4)
-            todos_slots = [c1_f1, c2_f1, c3_f1, c4_f1, c1_f2, c2_f2, c3_f2, c4_f2]
+            rows = [st.columns(4), st.columns(4)]
+            todos_slots = rows[0] + rows[1]
             
             for i, slot in enumerate(todos_slots):
                 if i < len(resumo_gestao):
                     nome, valor = resumo_gestao.index[i], resumo_gestao.values[i]
                     pct = (valor / total_periodo) * 100 if total_periodo > 0 else 0
                     
+                    # Cores baseadas nas Regras do PDF [cite: 2, 3, 5, 7]
                     if pct > 40: color = "#FF4B4B"
                     elif pct > 15: color = "#FFAA00"
                     elif pct > 5: color = "#FFE000"
@@ -129,11 +141,12 @@ with aba1:
                     
                     with slot:
                         with st.container(border=True):
-                            st.markdown(f"**{nome.upper()}**")
+                            # Título com classe CSS customizada para manter o tamanho igual
+                            st.markdown(f'<div class="card-title">{nome}</div>', unsafe_allow_html=True)
                             st.metric(label=f"{pct:.1f}% do total", value=f"R$ {valor:,.2f}")
-                            st.markdown(f'''<div style="background-color:#e0e0e0;border-radius:10px;height:8px;width:100%;"><div style="background-color:{color};height:8px;width:{pct}%;border-radius:10px;"></div></div>''', unsafe_allow_html=True)
+                            st.markdown(f'''<div style="background-color:#e0e0e0;border-radius:10px;height:6px;width:100%;"><div style="background-color:{color};height:8px;width:{pct}%;border-radius:10px;"></div></div>''', unsafe_allow_html=True)
                 else:
-                    slot.write("")
+                    slot.empty()
  
         st.divider()
  
@@ -150,7 +163,6 @@ with aba1:
 with aba2:
     st.write("### 📝 Tabela de Movimentações")
     if not df_raw.empty:
-        # AJUSTE AQUI: Mudamos "Área" para "Gestão" e vinculamos à coluna "gestao"
         st.data_editor(
             df_raw,
             column_order=("data_transacao", "descricao_original", "valor", "classificacao", "gestao", "categoria"),
